@@ -1,21 +1,23 @@
 package ca.concordia.server;
-import ca.concordia.filesystem.FileSystemManager;
-
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 
+import ca.concordia.filesystem.FileSystemManager;
+
 public class FileServer {
 
     private FileSystemManager fsManager;
     private int port;
     public FileServer(int port, String fileSystemName, int totalSize){
-        // Initialize the FileSystemManager
-        FileSystemManager fsManager = new FileSystemManager(fileSystemName,
-                10*128 );
-        this.fsManager = fsManager;
+        // Initialize the FileSystemManager using Singleton instance, replace constructor call with getInstance()
+        try {
+            this.fsManager = FileSystemManager.getInstance(fileSystemName, 10 * 128);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize FileSystemManager", e);
+        }
         this.port = port;
     }
 
