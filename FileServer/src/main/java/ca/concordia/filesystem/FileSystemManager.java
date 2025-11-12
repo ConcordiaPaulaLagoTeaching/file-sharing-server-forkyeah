@@ -12,19 +12,15 @@ public class FileSystemManager {
 
     private final int MAXFILES = 5;
     private final int MAXBLOCKS = 10;
+    private static int BLOCK_SIZE = 128; // Example block size
 
-    // Removed 'final' so it can be initialized later in getInstance()
     private static FileSystemManager instance;
-
     private final RandomAccessFile disk;
     private final ReentrantLock globalLock = new ReentrantLock();
-
-    private static final int BLOCK_SIZE = 128; // Example block size
 
     private FEntry[] inodeTable; // Array of inodes
     private boolean[] freeBlockList; // Bitmap for free blocks
 
-    // Made constructor private and initializated variables inside
     private FileSystemManager(String filename, int totalSize) throws IOException {
         // Initialize the file system manager with a file
         this.disk = new RandomAccessFile(filename, "rw"); // initialize disk
