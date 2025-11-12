@@ -71,18 +71,36 @@ public class FileServer {
                                 }
                                 writer.flush(); // ensure message sent immediately
                                 break;
+                                
+                                case "LIST":
+                                try {
+                                    String[] files = fsManager.listFiles();
+                                    if (files.length == 0) {
+                                        writer.println("No files found.");
+                                    } else {
+                                        // Send file names separated by commas (or each on new line)
+                                        for (String f : files) {
+                                            writer.println(f);
+                                        }
+                                    }
+                                } catch (Exception e) {
+                                    writer.println("ERROR: could not list files");
+                                }
+                                writer.flush();
+                                break;
 
-                            //TODO: Implement other commands READ, WRITE, DELETE, LIST
+                            //TODO: Implement other commands READ, WRITE, DELETE
                             case "QUIT":
                                 writer.println("SUCCESS: Disconnecting.");
                                 return;
+
                             default:
                                 writer.println("ERROR: Unknown command.");
                                 break;
                         }
                     }
                 } catch (Exception e) {
-                    e.printStackTrace(); // keep original logging behavior
+                    e.printStackTrace();
                 } finally {
                     try {
                         clientSocket.close();
@@ -96,4 +114,5 @@ public class FileServer {
             System.err.println("Could not start server on port " + port);
         }
     }
+
 }

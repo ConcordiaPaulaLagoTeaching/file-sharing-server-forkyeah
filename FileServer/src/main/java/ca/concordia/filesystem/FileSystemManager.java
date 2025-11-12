@@ -2,6 +2,8 @@ package ca.concordia.filesystem;
 
 import java.io.IOException;
 import java.io.RandomAccessFile; // for RandomAccessFile exception handling
+import java.util.ArrayList; // for listFiles()
+import java.util.List; // for listFiles()
 import java.util.concurrent.locks.ReentrantLock;
 
 import ca.concordia.filesystem.datastructures.FEntry;
@@ -43,7 +45,7 @@ public class FileSystemManager {
         return instance;
     }
 
-     public void createFile(String fileName) throws Exception {
+    public void createFile(String fileName) throws Exception {
         globalLock.lock(); // Acquire global lock to ensure thread safety
         try {
             // Check filename length
@@ -93,6 +95,22 @@ public class FileSystemManager {
 
         } finally {
             globalLock.unlock(); // release lock in all cases
+        }
+    }
+
+    // Return list of all filenames in filesystem, if none return empty array
+    public String[] listFiles() {
+        globalLock.lock(); // thread safety when reading inode table
+        try {
+            List<String> files = new ArrayList<>();
+            for (FEntry entry : inodeTable) {
+                if (entry != null) {
+                    files.add(entry.getFilename());
+                }
+            }
+            return files.toArray(new String[0]);
+        } finally {
+            globalLock.unlock();
         }
     }
 
