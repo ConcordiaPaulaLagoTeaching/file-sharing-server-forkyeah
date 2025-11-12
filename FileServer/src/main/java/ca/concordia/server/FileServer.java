@@ -35,15 +35,43 @@ public class FileServer {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         System.out.println("Received from client: " + line);
-                        String[] parts = line.split(" ");
+                        String[] parts = line.trim().split("\\s+", 2); // allow filenames with no accidental spacing issues
                         String command = parts[0].toUpperCase();
 
                         switch (command) {
                             case "CREATE":
-                                fsManager.createFile(parts[1]);
-                                writer.println("SUCCESS: File '" + parts[1] + "' created.");
-                                writer.flush();
+                                // check if filename exists
+                                if (parts.length < 2) {
+                                    writer.println("ERROR: missing filename");
+                                    break;
+                                }
+
+                                String filename = parts[1].trim();
+
+                                // make sure that filename ≤ 11 characters
+                                if (filename.length() > 11) {
+                                    writer.println("ERROR: filename too large");
+                                    break;
+                                }
+
+                                try {
+                                    // Attempt to create file in the file system
+                                    fsManager.createFile(filename);
+                                    writer.println("SUCCESS: File '" + filename + "' created.");
+                                } catch (Exception e) {
+                                    // exceptions
+                                    String msg = e.getMessage();
+                                    if (msg.contains("already exists")) {
+                                        writer.println("ERROR: file " + filename + " already exists");
+                                    } else if (msg.contains("Maximum file count") || msg.contains("Disk is full")) {
+                                        writer.println("ERROR: file too large");
+                                    } else {
+                                        writer.println("ERROR: " + msg);
+                                    }
+                                }
+                                writer.flush(); // ensure message sent immediately
                                 break;
+
                             //TODO: Implement other commands READ, WRITE, DELETE, LIST
                             case "QUIT":
                                 writer.println("SUCCESS: Disconnecting.");
@@ -54,7 +82,7 @@ public class FileServer {
                         }
                     }
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    e.printStackTrace(); // keep original logging behavior
                 } finally {
                     try {
                         clientSocket.close();
@@ -68,5 +96,4 @@ public class FileServer {
             System.err.println("Could not start server on port " + port);
         }
     }
-
 }
