@@ -57,12 +57,12 @@ public class FileServer {
                                 try {
                                     // Attempt to create file in the file system
                                     fsManager.createFile(filename);
-                                    writer.println("SUCCESS: File '" + filename + "' created.");
+                                    writer.println("SUCCESS: File '" + filename + "'' created.");
                                 } catch (Exception e) {
                                     // exceptions
                                     String msg = e.getMessage();
                                     if (msg.contains("already exists")) {
-                                        writer.println("ERROR: file " + filename + " already exists");
+                                        writer.println("ERROR: file '" + filename + "' already exists");
                                     } else if (msg.contains("file too large") || msg.contains("Disk is full")) {
                                         writer.println("ERROR: file too large");
                                     } else {
@@ -89,7 +89,26 @@ public class FileServer {
                                 writer.flush();
                                 break;
 
-                            //TODO: Implement other commands READ, WRITE, DELETE
+                                case "DELETE":
+                                if (parts.length < 2) {
+                                    writer.println("ERROR: missing filename");
+                                    break;
+                                }
+
+                                String deleteName = parts[1].trim();
+
+                                try {
+                                    fsManager.deleteFile(deleteName);
+                                    writer.println("SUCCESS: File '" + deleteName + "' deleted.");
+                                } catch (Exception e) {
+                                    writer.println(e.getMessage());
+                                }
+                                writer.flush();
+                                break;
+
+
+                            //TODO: Implement READ and WRITE
+
                             case "QUIT":
                                 writer.println("SUCCESS: Disconnecting.");
                                 return;
@@ -114,3 +133,4 @@ public class FileServer {
             System.err.println("Could not start server on port " + port);
         }
     }
+}

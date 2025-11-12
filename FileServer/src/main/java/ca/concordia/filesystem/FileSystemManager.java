@@ -114,5 +114,43 @@ public class FileSystemManager {
         }
     }
 
-    // TODO: Add readFile, writeFile and other required methods,
+    // Delete a file by name and free its allocated blocks
+    public void deleteFile(String fileName) throws Exception {
+        globalLock.lock(); // Ensure thread safety
+        try {
+            // Search for file in inode table
+            int foundIndex = -1;
+            for (int i = 0; i < MAXFILES; i++) {
+                if (inodeTable[i] != null && inodeTable[i].getFilename().equals(fileName)) {
+                    foundIndex = i;
+                    break;
+                }
+            }
+
+            // If not found, throw assignment-specified error
+            if (foundIndex == -1) {
+                throw new Exception("ERROR: file " + fileName + " does not exist");
+            }
+
+            // Free the associated block
+            short blockIndex = inodeTable[foundIndex].getFirstBlock();
+            if (blockIndex >= 0 && blockIndex < MAXBLOCKS) {
+                freeBlockList[blockIndex] = true;
+            }
+
+            // Remove the inode entry (effectively deleting file metadata)
+            inodeTable[foundIndex] = null;
+
+            // Overwrite the file on disk with zeros
+            disk.seek(blockIndex * BLOCK_SIZE);
+            byte[] empty = new byte[BLOCK_SIZE];
+            disk.write(empty);
+
+        } finally {
+            globalLock.unlock(); // Always release lock
+        }
+    }
+       
+    // TODO: Add readFile and writeFile
+
 }
