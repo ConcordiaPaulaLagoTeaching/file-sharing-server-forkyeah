@@ -90,9 +90,9 @@ public class FileSystemManager {
             FEntry newEntry = new FEntry(fileName, (short) 0, (short) blockIndex);
             inodeTable[freeIndex] = newEntry;
 
-            // Metadata placeholder write to disk
             disk.seek(blockIndex * BLOCK_SIZE);
-            disk.writeBytes("FILE:" + fileName + "\n");
+            byte[] empty = new byte[BLOCK_SIZE];
+            disk.write(empty);
 
         } finally {
             globalLock.unlock(); // release lock in all cases
@@ -115,11 +115,10 @@ public class FileSystemManager {
         }
     }
 
-    // READ (read file contents)
-    public String readFile(String fileName) throws Exception {
-        globalLock.lock(); // ensure thread safety
+    // READ
+    public byte[] readFile(String fileName) throws Exception {
+        globalLock.lock();
         try {
-            // Find the file
             FEntry target = null;
             for (FEntry entry : inodeTable) {
                 if (entry != null && entry.getFilename().equals(fileName)) {
@@ -128,33 +127,36 @@ public class FileSystemManager {
                 }
             }
 
-            // If file does not exist
             if (target == null) {
                 throw new Exception("ERROR: file " + fileName + " does not exist");
             }
 
-            // Read data from its assigned block
-            short startBlock = target.getFirstBlock();
             int size = target.getFilesize();
+            if (size <= 0) return new byte[0];
 
-            if (size <= 0) {
-                return ""; // empty file
+            short startBlock = target.getFirstBlock();
+            int blocksToRead = (int) Math.ceil((double) size / BLOCK_SIZE);
+            byte[] buffer = new byte[size];
+            int bytesRead = 0;
+
+            for (int i = 0; i < blocksToRead; i++) {
+                int blockIndex = (startBlock + i) % MAXBLOCKS;
+                disk.seek(blockIndex * BLOCK_SIZE);
+                int toRead = Math.min(BLOCK_SIZE, size - bytesRead);
+                disk.read(buffer, bytesRead, toRead);
+                bytesRead += toRead;
             }
 
-            disk.seek(startBlock * BLOCK_SIZE);
-            byte[] buffer = new byte[size];
-            disk.read(buffer, 0, size);
-
-            return new String(buffer);
-
+            return buffer;
         } finally {
             globalLock.unlock();
         }
     }
 
-    // WRITE (write data to an existing file)
-    public void writeFile(String fileName, String data) throws Exception {
+ // WRITE (write data to an existing file)
+    public void writeFile(String fileName, byte[] contents) throws Exception {
     globalLock.lock(); // Ensure thread safety
+    List<Integer> allocatedBlocks = new ArrayList<>();
     try {
         // Find the file
         FEntry target = null;
@@ -165,43 +167,74 @@ public class FileSystemManager {
             }
         }
 
-        // If file does not exist
         if (target == null) {
             throw new Exception("ERROR: file " + fileName + " does not exist");
         }
 
-        // Convert string data to bytes
-        byte[] content = data.getBytes();
-        int bytesToWrite = content.length;
+        int totalBytes = contents.length;
+        int blocksNeeded = (int) Math.ceil((double) totalBytes / BLOCK_SIZE);
 
-        // If file content exceeds available space
-        if (bytesToWrite > BLOCK_SIZE) {
-            throw new Exception("ERROR: file too large");
+            // Check free blocks
+            int freeCount = 0;
+            for (boolean free : freeBlockList) {
+                if (free) freeCount++;
+            }
+            if (blocksNeeded > freeCount) {
+                throw new Exception("ERROR: file too large");
+            }
+
+            // Allocate blocks before writing
+            for (int i = 0; i < MAXBLOCKS && allocatedBlocks.size() < blocksNeeded; i++) {
+                if (freeBlockList[i]) {
+                    allocatedBlocks.add(i);
+                }
+            }
+
+            if (allocatedBlocks.size() < blocksNeeded) {
+                throw new Exception("ERROR: file too large");
+            }
+
+            // Write data to allocated blocks
+            int bytesWritten = 0;
+            for (int i = 0; i < allocatedBlocks.size(); i++) {
+                int blockIndex = allocatedBlocks.get(i);
+                int startOffset = i * BLOCK_SIZE;
+                int bytesLeft = Math.min(BLOCK_SIZE, totalBytes - startOffset);
+
+                disk.seek(blockIndex * BLOCK_SIZE);
+                disk.write(contents, startOffset, bytesLeft);
+                freeBlockList[blockIndex] = false;
+                bytesWritten += bytesLeft;
+            }
+
+            // Free old blocks only after successful write
+            short oldBlock = target.getFirstBlock();
+            if (oldBlock >= 0 && oldBlock < MAXBLOCKS) {
+                freeBlockList[oldBlock] = true;
+            }
+
+            // Update metadata
+            target.setFirstBlock((short) (int) allocatedBlocks.get(0));
+            target.setFilesize((short) totalBytes);
+
+        } catch (Exception e) {
+            // Revert all allocated blocks on failure
+            for (int block : allocatedBlocks) {
+                freeBlockList[block] = true;
+                disk.seek(block * BLOCK_SIZE);
+                disk.write(new byte[BLOCK_SIZE]);
+            }
+            throw e;
+        } finally {
+            globalLock.unlock();
         }
-
-        // Overwrite the file from the start of its assigned block
-        short startBlock = target.getFirstBlock();
-        disk.seek(startBlock * BLOCK_SIZE);
-
-        // Write only up to BLOCK_SIZE bytes
-        disk.write(content, 0, bytesToWrite);
-
-        // Update file size metadata
-        target.setFilesize((short) bytesToWrite);
-
-    } finally {
-        globalLock.unlock();
     }
-}
-
-
-
 
     // DELETE (delete a file by name, free its allocated blocks, overwrite to zeros)
     public void deleteFile(String fileName) throws Exception {
         globalLock.lock(); // Ensure thread safety
         try {
-            // Search for file in inode table
+            // Find file
             int foundIndex = -1;
             for (int i = 0; i < MAXFILES; i++) {
                 if (inodeTable[i] != null && inodeTable[i].getFilename().equals(fileName)) {
@@ -210,30 +243,26 @@ public class FileSystemManager {
                 }
             }
 
-            // If not found, throw assignment-specified error
+            // If not found, error
             if (foundIndex == -1) {
                 throw new Exception("ERROR: file " + fileName + " does not exist");
             }
 
-            // Free the associated block
-            short blockIndex = inodeTable[foundIndex].getFirstBlock();
-            if (blockIndex >= 0 && blockIndex < MAXBLOCKS) {
+            // Free blocks and overwrite with zeros
+            short startBlock = inodeTable[foundIndex].getFirstBlock();
+            int size = inodeTable[foundIndex].getFilesize();
+            int blocksToFree = (int) Math.ceil((double) size / BLOCK_SIZE);
+            for (int i = 0; i < blocksToFree; i++) {
+                int blockIndex = (startBlock + i) % MAXBLOCKS;
                 freeBlockList[blockIndex] = true;
+                disk.seek(blockIndex * BLOCK_SIZE);
+                disk.write(new byte[BLOCK_SIZE]); // zero data
             }
 
-            // Remove the inode entry (effectively deleting file metadata)
             inodeTable[foundIndex] = null;
 
-            // Overwrite the file on disk with zeros
-            disk.seek(blockIndex * BLOCK_SIZE);
-            byte[] empty = new byte[BLOCK_SIZE];
-            disk.write(empty);
-
         } finally {
-            globalLock.unlock(); // Always release lock
+            globalLock.unlock();
         }
     }
-       
-    // TODO: TEST 
-
 }
