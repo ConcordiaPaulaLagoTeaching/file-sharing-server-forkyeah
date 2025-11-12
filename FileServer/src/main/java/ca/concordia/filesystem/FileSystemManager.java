@@ -115,9 +115,9 @@ public class FileSystemManager {
         }
     }
 
-    // WRITE (write data to an existing file)
-    public void writeFile(String fileName, String data) throws Exception {
-        globalLock.lock(); // Ensure thread safety
+    // READ (read file contents)
+    public String readFile(String fileName) throws Exception {
+        globalLock.lock(); // ensure thread safety
         try {
             // Find the file
             FEntry target = null;
@@ -133,35 +133,66 @@ public class FileSystemManager {
                 throw new Exception("ERROR: file " + fileName + " does not exist");
             }
 
-            // Convert string data to bytes
-            byte[] content = data.getBytes();
-            int numBlocksNeeded = (int) Math.ceil((double) content.length / BLOCK_SIZE);
-
-            // Ensure there are enough free blocks
-            int freeCount = 0;
-            for (boolean free : freeBlockList) {
-                if (free) freeCount++;
-            }
-            if (numBlocksNeeded > freeCount + 1) { // +1 for current block
-                throw new Exception("ERROR: file too large");
-            }
-
-            // Overwrite existing starting block and write data
+            // Read data from its assigned block
             short startBlock = target.getFirstBlock();
-            disk.seek(startBlock * BLOCK_SIZE);
-            disk.write(content, 0, Math.min(content.length, BLOCK_SIZE));
+            int size = target.getFilesize();
 
-            // Update file size metadata
-            target.setFilesize((short) content.length);
+            if (size <= 0) {
+                return ""; // empty file
+            }
+
+            disk.seek(startBlock * BLOCK_SIZE);
+            byte[] buffer = new byte[size];
+            disk.read(buffer, 0, size);
+
+            return new String(buffer);
 
         } finally {
             globalLock.unlock();
         }
     }
 
+    // WRITE (write data to an existing file)
+    public void writeFile(String fileName, String data) throws Exception {
+    globalLock.lock(); // Ensure thread safety
+    try {
+        // Find the file
+        FEntry target = null;
+        for (FEntry entry : inodeTable) {
+            if (entry != null && entry.getFilename().equals(fileName)) {
+                target = entry;
+                break;
+            }
+        }
 
+        // If file does not exist
+        if (target == null) {
+            throw new Exception("ERROR: file " + fileName + " does not exist");
+        }
 
+        // Convert string data to bytes
+        byte[] content = data.getBytes();
+        int bytesToWrite = content.length;
 
+        // If file content exceeds available space
+        if (bytesToWrite > BLOCK_SIZE) {
+            throw new Exception("ERROR: file too large");
+        }
+
+        // Overwrite the file from the start of its assigned block
+        short startBlock = target.getFirstBlock();
+        disk.seek(startBlock * BLOCK_SIZE);
+
+        // Write only up to BLOCK_SIZE bytes
+        disk.write(content, 0, bytesToWrite);
+
+        // Update file size metadata
+        target.setFilesize((short) bytesToWrite);
+
+    } finally {
+        globalLock.unlock();
+    }
+}
 
 
 
@@ -203,6 +234,6 @@ public class FileSystemManager {
         }
     }
        
-    // TODO: Add readFile and writeFile
+    // TODO: TEST 
 
 }

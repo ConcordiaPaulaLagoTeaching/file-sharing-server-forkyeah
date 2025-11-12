@@ -57,7 +57,7 @@ public class FileServer {
                                 try {
                                     // Attempt to create file in the file system
                                     fsManager.createFile(filename);
-                                    writer.println("SUCCESS: File '" + filename + "'' created.");
+                                    writer.println("SUCCESS: File '" + filename + "' created.");
                                 } catch (Exception e) {
                                     // exceptions
                                     String msg = e.getMessage();
@@ -115,16 +115,26 @@ public class FileServer {
                                 writer.flush();
                                 break;
 
+                            case "READ":
+                                if (parts.length < 2) {
+                                    writer.println("ERROR: missing filename");
+                                    break;
+                                }
 
+                                String readName = parts[1].trim();
 
-
-
-
-
-
-
-
-
+                                try {
+                                    String content = fsManager.readFile(readName);
+                                    if (content.isEmpty()) {
+                                        writer.println("(empty file)");
+                                    } else {
+                                        writer.println(content);
+                                    }
+                                } catch (Exception e) {
+                                    writer.println(e.getMessage());
+                                }
+                                writer.flush();
+                                break;
 
                                 case "DELETE":
                                 if (parts.length < 2) {
@@ -143,8 +153,7 @@ public class FileServer {
                                 writer.flush();
                                 break;
 
-
-                            //TODO: Implement READ and WRITE
+                            //TODO: TEST commands
 
                             case "QUIT":
                                 writer.println("SUCCESS: Disconnecting.");
