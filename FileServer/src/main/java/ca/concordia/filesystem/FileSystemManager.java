@@ -142,76 +142,85 @@ public class FileSystemManager {
 
     // WRITE (write data to an existing file)
     public void writeFile(String fileName, byte[] contents) throws Exception {
-        lock.writeLock().lock(); // Ensure thread safety
-        List<Integer> allocatedBlocks = new ArrayList<>();
+        lock.writeLock().lock();
+        List<Integer> allocatedDataBlocks = new ArrayList<>();
+        // *** THIS IS THE CORRECTED LINE AND ALL SUBSEQUENT USES ***
+        List<Integer> allocatedFNodes = new ArrayList<>();
+
         try {
-            // Find the file
-            FEntry target = null;
-            for (FEntry entry : fEntryTable) {
-                if (entry != null && entry.getFilename().equals(fileName)) {
-                    target = entry;
+            int fEntryIndex = -1;
+            for (int i = 0; i < MAXFILES; i++) {
+                if (fEntryTable[i] != null && fEntryTable[i].getFilename().equals(fileName)) {
+                    fEntryIndex = i;
                     break;
                 }
             }
 
-            if (target == null) {
-                throw new Exception("ERROR: file " + fileName + " does not exist");
+            if (fEntryIndex == -1) {
+                throw new Exception("ERROR: file '" + fileName + "' does not exist");
             }
 
-            int totalBytes = contents.length;
-            int blocksNeeded = (int) Math.ceil((double) totalBytes / BLOCK_SIZE);
+            // Free existing blocks before writing new content
+            freeFileBlocks(fEntryIndex);
 
-            // Check free blocks
-            int freeCount = 0;
-            for (boolean free : freeBlockList) {
-                if (free) freeCount++;
-            }
-            if (blocksNeeded > freeCount) {
-                throw new Exception("ERROR: file too large");
+            int bytesNeeded = contents.length;
+            int blocksNeeded = (int) Math.ceil((double) bytesNeeded / BLOCK_SIZE);
+
+            if (blocksNeeded == 0) { // Handle writing empty content
+                fEntryTable[fEntryIndex].setFilesize((short) 0);
+                fEntryTable[fEntryIndex].setFirstBlock((short) -1);
+                return;
             }
 
-            // Allocate blocks before writing
-            for (int i = 0; i < MAXBLOCKS && allocatedBlocks.size() < blocksNeeded; i++) {
+            // Find free blocks and fnodes
+            for (int i = 0; i < MAXBLOCKS && allocatedDataBlocks.size() < blocksNeeded; i++) {
                 if (freeBlockList[i]) {
-                    allocatedBlocks.add(i);
+                    allocatedDataBlocks.add(i);
+                    // We can reuse the FNode index to match the data block index
+                    allocatedFNodes.add(i);
                 }
             }
 
-            if (allocatedBlocks.size() < blocksNeeded) {
-                throw new Exception("ERROR: file too large");
+            if (allocatedDataBlocks.size() < blocksNeeded) {
+                throw new Exception("ERROR: Not enough free space (file too large)");
             }
 
-            // Write data to allocated blocks
-            int bytesWritten = 0;
-            for (int i = 0; i < allocatedBlocks.size(); i++) {
-                int blockIndex = allocatedBlocks.get(i);
-                int startOffset = i * BLOCK_SIZE;
-                int bytesLeft = Math.min(BLOCK_SIZE, totalBytes - startOffset);
-
-                disk.seek(blockIndex * BLOCK_SIZE);
-                disk.write(contents, startOffset, bytesLeft);
+            // Mark resources as used
+            for (int blockIndex : allocatedDataBlocks) {
                 freeBlockList[blockIndex] = false;
-                bytesWritten += bytesLeft;
             }
 
-            // Free old blocks only after successful write
-            short oldBlock = target.getFirstBlock();
-            if (oldBlock >= 0 && oldBlock < MAXBLOCKS) {
-                freeBlockList[oldBlock] = true;
+            // Link FNodes together
+            for (int i = 0; i < allocatedFNodes.size() - 1; i++) {
+                int currentFNodeIndex = allocatedFNodes.get(i);
+                int nextFNodeIndex = allocatedFNodes.get(i + 1);
+                fNodeTable[currentFNodeIndex].setNext(nextFNodeIndex);
+            }
+            // Last node points to -1
+            fNodeTable[allocatedFNodes.get(allocatedFNodes.size() - 1)].setNext(-1);
+
+
+            // Write data to blocks
+            for (int i = 0; i < allocatedDataBlocks.size(); i++) {
+                int blockIndex = allocatedDataBlocks.get(i);
+                fNodeTable[blockIndex].setBlockIndex(blockIndex);
+                disk.seek((long) blockIndex * BLOCK_SIZE);
+
+                int start = i * BLOCK_SIZE;
+                int len = Math.min(BLOCK_SIZE, bytesNeeded - start);
+                disk.write(contents, start, len);
             }
 
-            // Update metadata
-            target.setFirstBlock((short) (int) allocatedBlocks.get(0));
-            target.setFilesize((short) totalBytes);
+            // Update FEntry
+            fEntryTable[fEntryIndex].setFirstBlock(allocatedFNodes.get(0).shortValue());
+            fEntryTable[fEntryIndex].setFilesize((short) bytesNeeded);
 
         } catch (Exception e) {
-            // Revert all allocated blocks on failure
-            for (int block : allocatedBlocks) {
-                freeBlockList[block] = true;
-                disk.seek(block * BLOCK_SIZE);
-                disk.write(new byte[BLOCK_SIZE]);
+            // Rollback changes on failure
+            for (int blockIndex : allocatedDataBlocks) {
+                freeBlockList[blockIndex] = true;
             }
-            throw e;
+            throw e; // rethrow exception
         } finally {
             lock.writeLock().unlock();
         }
