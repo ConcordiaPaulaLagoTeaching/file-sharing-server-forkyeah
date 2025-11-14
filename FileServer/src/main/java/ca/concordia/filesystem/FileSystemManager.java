@@ -13,7 +13,7 @@ import ca.concordia.filesystem.datastructures.FNode;
 public class FileSystemManager {
 
     private final int MAXFILES = 5;
-    private final int MAXBLOCKS = 10;
+    private final int MAXBLOCKS;
     private final int BLOCK_SIZE = 128;
 
     private static FileSystemManager instance;
@@ -24,24 +24,26 @@ public class FileSystemManager {
     private final FNode[] fNodeTable;
     private final boolean[] freeBlockList; // Bitmap for free blocks
 
-    private FileSystemManager(String filename) throws IOException {
+    public FileSystemManager(String filename, int totalSize) throws IOException {
         this.disk = new RandomAccessFile(filename, "rw");
-        this.disk.setLength((long) MAXBLOCKS * BLOCK_SIZE); // Pre-allocate file size
+
+        this.MAXBLOCKS = totalSize / BLOCK_SIZE;
+        this.disk.setLength((long) this.MAXBLOCKS * BLOCK_SIZE);
 
         this.fEntryTable = new FEntry[MAXFILES];
-        this.fNodeTable = new FNode[MAXBLOCKS]; // One FNode per potential block
-        this.freeBlockList = new boolean[MAXBLOCKS];
+        this.fNodeTable = new FNode[this.MAXBLOCKS];
+        this.freeBlockList = new boolean[this.MAXBLOCKS];
 
-        for (int i = 0; i < MAXBLOCKS; i++) {
+        for (int i = 0; i < this.MAXBLOCKS; i++) {
             freeBlockList[i] = true;
-            fNodeTable[i] = new FNode(-1); // Initialize all FNodes
+            fNodeTable[i] = new FNode(-1);
         }
     }
 
     // Singleton getInstance method
-    public static synchronized FileSystemManager getInstance(String filename) throws IOException {
+    public static synchronized FileSystemManager getInstance(String filename, int totalSize) throws IOException {
         if (instance == null) {
-            instance = new FileSystemManager(filename);
+            instance = new FileSystemManager(filename, totalSize);
         }
         return instance;
     }
