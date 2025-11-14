@@ -15,9 +15,9 @@ public class FileServer {
     private FileSystemManager fsManager;
     private int port;
 
-    public FileServer(int port, String fileSystemName) {
+    public FileServer(int port, String fileSystemName, int totalSize) {
         try {
-            this.fsManager = FileSystemManager.getInstance(fileSystemName, 10 * 128);
+            this.fsManager = FileSystemManager.getInstance(fileSystemName, totalSize);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize FileSystemManager", e);
         }
