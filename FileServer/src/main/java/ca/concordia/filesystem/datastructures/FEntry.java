@@ -1,8 +1,9 @@
 package ca.concordia.filesystem.datastructures;
 
-import java.util.LinkedList;
+import java.io.Serializable;
 
-public class FEntry {
+public class FEntry implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     private String filename;
     private short filesize;

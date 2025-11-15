@@ -1,7 +1,6 @@
 package ca.concordia.filesystem;
 
-import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -20,23 +19,18 @@ public class FileSystemManager {
     private final RandomAccessFile disk;
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
 
-    private final FEntry[] fEntryTable; // Array of inodes
-    private final FNode[] fNodeTable;
-    private final boolean[] freeBlockList; // Bitmap for free blocks
+    private FEntry[] fEntryTable; // Array of inodes
+    private FNode[] fNodeTable;
+    private boolean[] freeBlockList; // Bitmap for free blocks
+    private final String metadataFilename;
 
     public FileSystemManager(String filename, int totalSize) throws IOException {
         this.disk = new RandomAccessFile(filename, "rw");
-
         this.MAXBLOCKS = totalSize / BLOCK_SIZE;
-        this.disk.setLength((long) this.MAXBLOCKS * BLOCK_SIZE);
+        this.metadataFilename = filename + ".meta";
 
-        this.fEntryTable = new FEntry[MAXFILES];
-        this.fNodeTable = new FNode[this.MAXBLOCKS];
-        this.freeBlockList = new boolean[this.MAXBLOCKS];
-
-        for (int i = 0; i < this.MAXBLOCKS; i++) {
-            freeBlockList[i] = true;
-            fNodeTable[i] = new FNode(-1);
+        if (!loadState()) {
+            initializeNewFileSystem();
         }
     }
 
@@ -46,6 +40,57 @@ public class FileSystemManager {
             instance = new FileSystemManager(filename, totalSize);
         }
         return instance;
+    }
+
+
+    private static class FileSystemState implements Serializable {
+        private static final long serialVersionUID = 1L;
+        final FEntry[] fEntryTable;
+        final FNode[] fNodeTable;
+        final boolean[] freeBlockList;
+
+        FileSystemState(FEntry[] fe, FNode[] fn, boolean[] fb) {
+            this.fEntryTable = fe;
+            this.fNodeTable = fn;
+            this.freeBlockList = fb;
+        }
+    }
+
+    private void initializeNewFileSystem() throws IOException {
+        System.out.println("Initializing a new file system...");
+        this.disk.setLength((long) MAXBLOCKS * BLOCK_SIZE);
+        this.fEntryTable = new FEntry[MAXFILES];
+        this.fNodeTable = new FNode[MAXBLOCKS];
+        this.freeBlockList = new boolean[MAXBLOCKS];
+        for (int i = 0; i < MAXBLOCKS; i++) {
+            freeBlockList[i] = true;
+            fNodeTable[i] = new FNode(-1);
+        }
+        saveState();
+    }
+
+    private void saveState() throws IOException {
+        try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(metadataFilename))) {
+            FileSystemState state = new FileSystemState(fEntryTable, fNodeTable, freeBlockList);
+            out.writeObject(state);
+        }
+    }
+
+    private boolean loadState() {
+        File metaFile = new File(metadataFilename);
+        if (!metaFile.exists()) return false;
+
+        try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(metaFile))) {
+            FileSystemState state = (FileSystemState) in.readObject();
+            this.fEntryTable = state.fEntryTable;
+            this.fNodeTable = state.fNodeTable;
+            this.freeBlockList = state.freeBlockList;
+            System.out.println("Successfully loaded file system state from disk.");
+            return true;
+        } catch (IOException | ClassNotFoundException e) {
+            System.err.println("Could not load metadata file, a new one will be created: " + e.getMessage());
+            return false;
+        }
     }
 
     // CREATE (create a new file with given name)
@@ -79,6 +124,7 @@ public class FileSystemManager {
             }
 
             fEntryTable[freeFEntryIndex] = new FEntry(fileName, (short) 0, (short) -1);
+            saveState();
         } finally {
             lock.writeLock().unlock(); // release lock in all cases
         }
@@ -146,7 +192,6 @@ public class FileSystemManager {
     public void writeFile(String fileName, byte[] contents) throws Exception {
         lock.writeLock().lock();
         List<Integer> allocatedDataBlocks = new ArrayList<>();
-        // *** THIS IS THE CORRECTED LINE AND ALL SUBSEQUENT USES ***
         List<Integer> allocatedFNodes = new ArrayList<>();
 
         try {
@@ -171,6 +216,7 @@ public class FileSystemManager {
             if (blocksNeeded == 0) { // Handle writing empty content
                 fEntryTable[fEntryIndex].setFilesize((short) 0);
                 fEntryTable[fEntryIndex].setFirstBlock((short) -1);
+                saveState();
                 return;
             }
 
@@ -178,7 +224,6 @@ public class FileSystemManager {
             for (int i = 0; i < MAXBLOCKS && allocatedDataBlocks.size() < blocksNeeded; i++) {
                 if (freeBlockList[i]) {
                     allocatedDataBlocks.add(i);
-                    // We can reuse the FNode index to match the data block index
                     allocatedFNodes.add(i);
                 }
             }
@@ -217,6 +262,7 @@ public class FileSystemManager {
             fEntryTable[fEntryIndex].setFirstBlock(allocatedFNodes.get(0).shortValue());
             fEntryTable[fEntryIndex].setFilesize((short) bytesNeeded);
 
+            saveState();
         } catch (Exception e) {
             // Rollback changes on failure
             for (int blockIndex : allocatedDataBlocks) {
@@ -248,8 +294,8 @@ public class FileSystemManager {
 
             // Free all associated blocks and FNodes
             freeFileBlocks(fEntryIndex);
-
             fEntryTable[fEntryIndex] = null;
+            saveState();
         } finally {
             lock.writeLock().unlock();
         }

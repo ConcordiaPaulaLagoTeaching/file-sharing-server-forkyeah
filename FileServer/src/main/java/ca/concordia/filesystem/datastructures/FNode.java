@@ -1,6 +1,9 @@
 package ca.concordia.filesystem.datastructures;
 
-public class FNode {
+import java.io.Serializable;
+
+public class FNode implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     private int blockIndex;
     private int next;
